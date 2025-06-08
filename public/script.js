@@ -265,20 +265,47 @@ function addGameActions() {
   `;
   
   document.getElementById("play-again-btn").onclick = () => {
-    if (isHost) {
-      actionsDiv.innerHTML = "";
-      scores = {};
-      db.ref(`rooms/${roomId}/currentRound`).set(1).then(() => {
-        return resetTable(roomId, 1);
-      }).then(() => {
-        return db.ref(`rooms/${roomId}/players`).once('value');
-      }).then(snapshot => {
-        const players = snapshot.val() || {};
-        return dealNewCardsToAll(roomId, players);
-      }).catch(error => {
-        console.error("Error restarting game:", error);
-      });
-    }
+    actionsDiv.innerHTML = "";
+    scores = {};
+    currentRound = 1;
+    tableRevealed = false;
+    selectedCardIndex = null;
+    
+    // รีเซ็ตข้อมูลในหน้าจอ
+    const cardDiv = document.getElementById("player-hand");
+    if (cardDiv) cardDiv.innerHTML = "";
+    
+    const battlefield = document.getElementById("battlefield");
+    if (battlefield) battlefield.innerHTML = "";
+    
+    // แจกไพ่ใหม่ให้ทุกคนแบบ local
+    db.ref(`rooms/${roomId}/players`).once('value').then(snapshot => {
+      const players = snapshot.val() || {};
+      
+      // แจกไพ่ใหม่ให้ตัวเองและแสดงทันที
+      const newCards = getRandomCards();
+      myCards = newCards;
+      showCards(newCards);
+      
+      // อัปเดตข้อมูลผู้เล่นและสนามรบ
+      updatePlayerList(players);
+      renderBattleSlots(players);
+      updateRoundInfo(1);
+      
+      // เพิ่มปุ่มวางการ์ดใหม่
+      if (!document.getElementById("play-card-btn")) {
+        const playBtn = document.createElement("button");
+        playBtn.id = "play-card-btn";
+        playBtn.innerText = "วางการ์ดในรอบนี้";
+        playBtn.onclick = () => playCard();
+        cardDiv.appendChild(document.createElement("br"));
+        cardDiv.appendChild(playBtn);
+      }
+      
+      alert("เริ่มเกมใหม่! เลือกการ์ดและเริ่มเล่นได้เลย");
+    }).catch(error => {
+      console.error("Error restarting game:", error);
+    });
   };
   
   document.getElementById("exit-btn").onclick = () => {
@@ -353,9 +380,11 @@ function listenForBattle(roomIdParam) {
               `;
             } else {
               slot.innerHTML = tableData[pid] ? "🎴 วางการ์ดแล้ว" : (pdata.name || pid);
-            }
-          }
-        });
+            }}
+        })
+      })
+    }
+  );
         
         // จัดการการแสดงการ์ดในมือ
         if (players[playerId] && players[playerId].cards) {
@@ -397,7 +426,8 @@ function listenForBattle(roomIdParam) {
         
         if (cardsPlayed === playerCount && playerCount > 0 && !tableRevealed) {
           tableRevealed = true;
-          
+
+          // --- รอ 3 วิให้ทุกคนเห็นการ์ดทุกคนก่อนประกาศผล ---
           setTimeout(() => {
             // แสดงการ์ดทุกคน
             Object.entries(players).forEach(([pid, pdata]) => {
@@ -410,6 +440,33 @@ function listenForBattle(roomIdParam) {
                 `;
               }
             });
+
+            // --- หลังจากรอ 3 วิแล้วค่อยประกาศผล ---
+            setTimeout(() => {
+              const { winners } = calculateWinner(tableData);
+              updateScores(winners, players);
+              showRoundResults(tableData, players, winners);
+              renderBattleSlots(players);
+
+              if (currentRound >= 5) {
+                // จบเกม
+                showFinalResults(players);
+                addGameActions();
+              } else {
+                // ไปรอบต่อไป
+                if (isHost) {
+                  db.ref(`rooms/${roomIdParam}/currentRound`).set(currentRound + 1).then(() => {
+                    return resetTable(roomIdParam, currentRound + 1);
+                  }).then(() => {
+                    return dealNewCardsToAll(roomIdParam, players);
+                  }).catch(error => {
+                    console.error("Error advancing round:", error);
+                  });
+                }
+              }
+            }, 3000); // <<<--- รอ 3 วิ ก่อนประกาศผล
+          }, 0); // <<<--- ไม่ต้องรอซ้ำตรงนี้
+        }
             
             // คำนวณผลลัพธ์
             const { winners } = calculateWinner(tableData);
@@ -438,10 +495,6 @@ function listenForBattle(roomIdParam) {
             }, 3000);
           }, 2000);
         }
-      });
-    });
-  });
-}
 
 // สร้างห้อง (คนแรก)
 window.createRoom = function () {
