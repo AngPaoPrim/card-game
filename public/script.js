@@ -13,32 +13,39 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
+// กำหนด min/max สำหรับสุ่ม power
 const allCards = [
-  { name: "Skibidi Toilet King", power: 100, img: "cards/1.png" },
-  { name: "Titan Cameraman", power: 95, img: "cards/2.png" },
-  { name: "TV Man", power: 88, img: "cards/3.png" },
-  { name: "Speaker Man", power: 83, img: "cards/4.png" },
-  { name: "Titan Camerawoman", power: 90, img: "cards/5.png" },
-  { name: "Skibidi Spider Toilet", power: 87, img: "cards/6.png" },
-  { name: "Ice Skibidi", power: 70, img: "cards/7.png" },
-  { name: "Skibidi Cat", power: 68, img: "cards/8.png" },
-  { name: "Doctor Skibidi", power: 75, img: "cards/9.png" },
-  { name: "Skibidi Joker", power: 73, img: "cards/10.png" },
-  { name: "Fire Skibidi", power: 69, img: "cards/11.png" },
-  { name: "Golden Skibidi", power: 92, img: "cards/12.png" },
-  { name: "Steel Skibidi", power: 80, img: "cards/13.png" },
-  { name: "Water Skibidi", power: 71, img: "cards/14.png" },
-  { name: "Hero Cameraman", power: 89, img: "cards/15.png" },
-  { name: "Magic Kicker Skibidi", power: 77, img: "cards/16.png" },
-  { name: "Skibidi Elephant", power: 85, img: "cards/17.png" },
-  { name: "Sea Skibidi", power: 66, img: "cards/18.png" },
-  { name: "Vampire Skibidi", power: 84, img: "cards/19.png" },
-  { name: "Lava Zombie Skibidi", power: 79, img: "cards/20.png" },
+  { name: "Skibidi Toilet King", min: 80, max: 100, img: "cards/1.png" },
+  { name: "Titan Cameraman", min: 80, max: 95, img: "cards/2.png" },
+  { name: "TV Man", min: 75, max: 88, img: "cards/3.png" },
+  { name: "Speaker Man", min: 73, max: 83, img: "cards/4.png" },
+  { name: "Titan Camerawoman", min: 80, max: 90, img: "cards/5.png" },
+  { name: "Skibidi Spider Toilet", min: 87, max: 90, img: "cards/6.png" },
+  { name: "Ice Skibidi", min: 70, max: 80, img: "cards/7.png" },
+  { name: "Skibidi Cat", min: 68, max: 70, img: "cards/8.png" },
+  { name: "Doctor Skibidi", min: 60, max: 75, img: "cards/9.png" },
+  { name: "Skibidi Joker", min: 73, max: 79, img: "cards/10.png" },
+  { name: "Fire Skibidi", min: 69, max: 75, img: "cards/11.png" },
+  { name: "Golden Skibidi", min: 92, max: 99, img: "cards/12.png" },
+  { name: "Steel Skibidi", min: 80, max: 85, img: "cards/13.png" },
+  { name: "Water Skibidi", min: 71, max: 71, img: "cards/14.png" },
+  { name: "Hero Cameraman", min: 65, max: 75, img: "cards/15.png" },
+  { name: "Magic Kicker Skibidi", min: 77, max: 80, img: "cards/16.png" },
+  { name: "Skibidi Elephant", min: 85, max: 85, img: "cards/17.png" },
+  { name: "Sea Skibidi", min: 66, max: 66, img: "cards/18.png" },
+  { name: "Vampire Skibidi", min: 84, max: 84, img: "cards/19.png" },
+  { name: "Lava Zombie Skibidi", min: 79, max: 79, img: "cards/20.png" },
 ];
 
+// สุ่มการ์ด 5 ใบ โดยแต่ละใบสุ่ม power ตาม min/max
 function getRandomCards() {
   const shuffled = [...allCards].sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, 5);
+  return shuffled.slice(0, 5).map(card => ({
+    ...card,
+    power: card.min === card.max
+      ? card.min
+      : Math.floor(Math.random() * (card.max - card.min + 1)) + card.min
+  }));
 }
 
 let playerId = null;
@@ -226,6 +233,31 @@ function listenForBattle(roomIdParam) {
                   .filter(([_, sc]) => sc === maxScore)
                   .map(([pid]) => players[pid]?.name || pid);
 
+                // --- ปุ่มเล่นใหม่/ออก ---
+                let actionsDiv = document.getElementById("game-actions");
+                if (!actionsDiv) {
+                  actionsDiv = document.createElement("div");
+                  actionsDiv.id = "game-actions";
+                  actionsDiv.style.margin = "20px";
+                  document.body.appendChild(actionsDiv);
+                }
+                actionsDiv.innerHTML = `
+                  <button id="play-again-btn">เล่นใหม่</button>
+                  <button id="exit-btn">ออก</button>
+                `;
+                document.getElementById("play-again-btn").onclick = () => {
+                  actionsDiv.innerHTML = "";
+                  db.ref(`rooms/${roomIdParam}/currentRound`).set(1);
+                  if (isHost) {
+                    setTimeout(() => {
+                      dealNewCardsToAll(roomIdParam, players);
+                    }, 500);
+                  }
+                };
+                document.getElementById("exit-btn").onclick = () => {
+                  location.reload();
+                };
+
                 alert(
                   "จบเกม!\n\nคะแนนรวม:\n" +
                   Object.entries(scores).map(([pid, sc]) => {
@@ -234,7 +266,6 @@ function listenForBattle(roomIdParam) {
                   }).join("\n") +
                   "\n\nผู้ชนะ: " + (topPlayers.length === 1 ? topPlayers[0] : "เสมอกัน")
                 );
-                db.ref(`rooms/${roomIdParam}/currentRound`).set(1);
               } else {
                 db.ref(`rooms/${roomIdParam}/currentRound`).set(currentRound + 1);
                 // แจกไพ่ใหม่หลังขึ้นรอบใหม่ (เฉพาะ host)
