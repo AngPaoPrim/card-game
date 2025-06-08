@@ -66,6 +66,7 @@ let scores = {};
 let tableRevealed = false;
 let isHost = false;
 let isGameActive = false;
+let roundProcessing = false;
 
 function selectCard(index) {
   selectedCardIndex = index;
@@ -270,6 +271,7 @@ function addGameActions() {
     currentRound = 1;
     tableRevealed = false;
     selectedCardIndex = null;
+    roundProcessing = false;
     
     // รีเซ็ตข้อมูลในหน้าจอ
     const cardDiv = document.getElementById("player-hand");
@@ -318,6 +320,54 @@ function addGameActions() {
   };
 }
 
+function processRoundResults(tableData, players) {
+  if (roundProcessing) return;
+  roundProcessing = true;
+  
+  // แสดงการ์ดทุกคนทันที
+  Object.entries(players).forEach(([pid, pdata]) => {
+    const card = tableData[pid];
+    const slot = document.getElementById("slot-" + pid);
+    if (slot && card) {
+      slot.innerHTML = `
+        <img src="${card.img}" alt="${card.name}" style="width:80px;height:80px;border-radius:6px;" onerror="this.style.display='none'"><br>
+        <strong>${card.name}</strong><br>พลัง: ${card.power}
+      `;
+    }
+  });
+
+  // รอ 3 วินาทีแล้วประกาศผล
+  setTimeout(() => {
+    const { winners } = calculateWinner(tableData);
+    updateScores(winners, players);
+    showRoundResults(tableData, players, winners);
+    renderBattleSlots(players);
+
+    if (currentRound >= 5) {
+      // จบเกม
+      showFinalResults(players);
+      addGameActions();
+      roundProcessing = false;
+    } else {
+      // ไปรอบต่อไป
+      if (isHost) {
+        db.ref(`rooms/${roomId}/currentRound`).set(currentRound + 1).then(() => {
+          return resetTable(roomId, currentRound + 1);
+        }).then(() => {
+          return dealNewCardsToAll(roomId, players);
+        }).then(() => {
+          roundProcessing = false;
+        }).catch(error => {
+          console.error("Error advancing round:", error);
+          roundProcessing = false;
+        });
+      } else {
+        roundProcessing = false;
+      }
+    }
+  }, 3000);
+}
+
 function listenForBattle(roomIdParam) {
   if (!roomIdParam) return;
   
@@ -338,23 +388,28 @@ function listenForBattle(roomIdParam) {
       location.reload();
       return;
     }
+  });
+
+  // Listen to current round
+  gameStateListener = db.ref(`rooms/${roomIdParam}/currentRound`);
+  gameStateListener.on('value', (roundSnap) => {
+    const round = roundSnap.val() || 1;
+    currentRound = round;
+    updateRoundInfo(currentRound);
     
-    // Listen to current round
-    if (gameStateListener) gameStateListener.off();
-    gameStateListener = db.ref(`rooms/${roomIdParam}/currentRound`);
-    gameStateListener.on('value', (roundSnap) => {
-      const round = roundSnap.val() || 1;
-      currentRound = round;
-      updateRoundInfo(currentRound);
+    isHost = playerId === "player1";
+    tableRevealed = false;
+    roundProcessing = false;
+    
+    // Listen to table for current round
+    if (roundListener) roundListener.off();
+    roundListener = db.ref(`rooms/${roomIdParam}/table/round${currentRound}`);
+    roundListener.on('value', (snapshot) => {
+      const tableData = snapshot.val() || {};
       
-      isHost = playerId === "player1";
-      tableRevealed = false;
-      
-      // Listen to table for current round
-      if (roundListener) roundListener.off();
-      roundListener = db.ref(`rooms/${roomIdParam}/table/round${currentRound}`);
-      roundListener.on('value', (snapshot) => {
-        const tableData = snapshot.val() || {};
+      // Get current players
+      db.ref(`rooms/${roomIdParam}/players`).once('value').then(playersSnap => {
+        const players = playersSnap.val() || {};
         
         // แสดงการ์ดที่วางแล้ว
         Object.entries(players).forEach(([pid, pdata]) => {
@@ -380,11 +435,9 @@ function listenForBattle(roomIdParam) {
               `;
             } else {
               slot.innerHTML = tableData[pid] ? "🎴 วางการ์ดแล้ว" : (pdata.name || pid);
-            }}
-        })
-      })
-    }
-  );
+            }
+          }
+        });
         
         // จัดการการแสดงการ์ดในมือ
         if (players[playerId] && players[playerId].cards) {
@@ -424,77 +477,14 @@ function listenForBattle(roomIdParam) {
         const playerCount = Object.keys(players).length;
         const cardsPlayed = Object.keys(tableData).length;
         
-        if (cardsPlayed === playerCount && playerCount > 0 && !tableRevealed) {
+        if (cardsPlayed === playerCount && playerCount > 0 && !tableRevealed && !roundProcessing) {
           tableRevealed = true;
-
-          // --- รอ 3 วิให้ทุกคนเห็นการ์ดทุกคนก่อนประกาศผล ---
-          setTimeout(() => {
-            // แสดงการ์ดทุกคน
-            Object.entries(players).forEach(([pid, pdata]) => {
-              const card = tableData[pid];
-              const slot = document.getElementById("slot-" + pid);
-              if (slot && card) {
-                slot.innerHTML = `
-                  <img src="${card.img}" alt="${card.name}" style="width:80px;height:80px;border-radius:6px;" onerror="this.style.display='none'"><br>
-                  <strong>${card.name}</strong><br>พลัง: ${card.power}
-                `;
-              }
-            });
-
-            // --- หลังจากรอ 3 วิแล้วค่อยประกาศผล ---
-            setTimeout(() => {
-              const { winners } = calculateWinner(tableData);
-              updateScores(winners, players);
-              showRoundResults(tableData, players, winners);
-              renderBattleSlots(players);
-
-              if (currentRound >= 5) {
-                // จบเกม
-                showFinalResults(players);
-                addGameActions();
-              } else {
-                // ไปรอบต่อไป
-                if (isHost) {
-                  db.ref(`rooms/${roomIdParam}/currentRound`).set(currentRound + 1).then(() => {
-                    return resetTable(roomIdParam, currentRound + 1);
-                  }).then(() => {
-                    return dealNewCardsToAll(roomIdParam, players);
-                  }).catch(error => {
-                    console.error("Error advancing round:", error);
-                  });
-                }
-              }
-            }, 3000); // <<<--- รอ 3 วิ ก่อนประกาศผล
-          }, 0); // <<<--- ไม่ต้องรอซ้ำตรงนี้
+          processRoundResults(tableData, players);
         }
-            
-            // คำนวณผลลัพธ์
-            const { winners } = calculateWinner(tableData);
-            updateScores(winners, players);
-            
-            setTimeout(() => {
-              showRoundResults(tableData, players, winners);
-              renderBattleSlots(players);
-              
-              if (currentRound >= 5) {
-                // จบเกม
-                showFinalResults(players);
-                addGameActions();
-              } else {
-                // ไปรอบต่อไป
-                if (isHost) {
-                  db.ref(`rooms/${roomIdParam}/currentRound`).set(currentRound + 1).then(() => {
-                    return resetTable(roomIdParam, currentRound + 1);
-                  }).then(() => {
-                    return dealNewCardsToAll(roomIdParam, players);
-                  }).catch(error => {
-                    console.error("Error advancing round:", error);
-                  });
-                }
-              }
-            }, 3000);
-          }, 2000);
-        }
+      });
+    });
+  });
+}
 
 // สร้างห้อง (คนแรก)
 window.createRoom = function () {
