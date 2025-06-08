@@ -72,6 +72,7 @@ function selectCard(index) {
 }
 
 function showCards(cards) {
+  selectedCardIndex = null; // Reset ทุกครั้งก่อนแสดง
   myCards = cards;
   const cardDiv = document.getElementById("player-hand");
   cardDiv.innerHTML = "";
@@ -86,11 +87,7 @@ function showCards(cards) {
     cardDiv.appendChild(div);
   });
 
-  const playBtn = document.createElement("button");
-  playBtn.innerText = "วางการ์ดในรอบนี้";
-  playBtn.onclick = () => playCard();
-  cardDiv.appendChild(document.createElement("br"));
-  cardDiv.appendChild(playBtn);
+  // ปุ่มวางการ์ดจะถูกเพิ่มเฉพาะถ้ายังไม่ได้วางการ์ดในรอบนี้ (ดูใน listenForBattle)
 }
 
 function renderBattleSlots(players) {
@@ -185,6 +182,33 @@ function listenForBattle(roomIdParam) {
               : (pdata.name || pid);
           }
         });
+
+        // แสดงปุ่มวางการ์ดเฉพาะถ้ายังไม่ได้วาง
+        if (players[playerId] && players[playerId].cards) {
+          const cardDiv = document.getElementById("player-hand");
+          if (!tableData[playerId]) {
+            showCards(players[playerId].cards);
+            // เพิ่มปุ่มวางการ์ด
+            const playBtn = document.createElement("button");
+            playBtn.innerText = "วางการ์ดในรอบนี้";
+            playBtn.onclick = () => playCard();
+            cardDiv.appendChild(document.createElement("br"));
+            cardDiv.appendChild(playBtn);
+          } else {
+            // ถ้าวางแล้ว ให้โชว์การ์ดเฉยๆ ไม่มีปุ่ม
+            myCards = players[playerId].cards;
+            cardDiv.innerHTML = "";
+            myCards.forEach((card, index) => {
+              const div = document.createElement("div");
+              div.className = "card";
+              div.innerHTML = `
+                <img src="${card.img}" alt="${card.name}">
+                <strong>${card.name}</strong><br>พลัง: ${card.power}
+              `;
+              cardDiv.appendChild(div);
+            });
+          }
+        }
 
         // เมื่อทุกคนวางครบ
         if (
@@ -286,11 +310,6 @@ function listenForBattle(roomIdParam) {
           }, 3000); // delay 3 วิ
         }
       });
-
-      // แสดงไพ่เราเองทุกตา
-      if (players[playerId] && players[playerId].cards) {
-        showCards(players[playerId].cards);
-      }
     });
   });
 }
