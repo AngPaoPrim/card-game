@@ -48,7 +48,8 @@ let roomId = "";
 let playerName = "";
 let currentRound = 1;
 let roundListener = null;
-let scores = {}; // เก็บคะแนนรวมแต่ละคน
+let scores = {};
+let tableRevealed = false;
 
 function selectCard(index) {
   selectedCardIndex = index;
@@ -102,6 +103,13 @@ function updateRoundInfo(currentRound) {
   roundDiv.innerHTML = `<b>รอบที่ ${currentRound} / 5</b>`;
 }
 
+function dealNewCardsToAll(roomId, players) {
+  Object.keys(players).forEach(pid => {
+    const newCards = getRandomCards();
+    db.ref(`rooms/${roomId}/players/${pid}/cards`).set(newCards);
+  });
+}
+
 function playCard() {
   if (selectedCardIndex === null) {
     alert("กรุณาเลือกการ์ดก่อนวาง!");
@@ -130,97 +138,113 @@ function listenForBattle(roomIdParam) {
     updatePlayerList(players);
     renderBattleSlots(players);
 
-    // ฟัง currentRound จาก database
     db.ref(`rooms/${roomIdParam}/currentRound`).on('value', (roundSnap) => {
       const round = roundSnap.val() || 1;
       currentRound = round;
       updateRoundInfo(currentRound);
 
-      // ถ้ามี listener เก่า ให้ปิดก่อน
+      // แจกไพ่ใหม่ทุกตา
       if (roundListener) roundListener.off();
+      dealNewCardsToAll(roomIdParam, players);
+      tableRevealed = false;
 
-      // ฟังรอบปัจจุบัน
       roundListener = db.ref(`rooms/${roomIdParam}/table/round${currentRound}`);
       roundListener.on('value', (snapshot) => {
         const tableData = snapshot.val() || {};
-        Object.entries(tableData).forEach(([pid, card]) => {
-          document.getElementById("slot-" + pid).innerHTML = `
-            <img src="${card.img}" alt="${card.name}" style="width:80px;height:80px;border-radius:6px;"><br>
-            <strong>${card.name}</strong><br>พลัง: ${card.power}
-          `;
+
+        // แสดงเฉพาะไพ่ที่เราวางเอง (หรือยังไม่วาง)
+        Object.entries(players).forEach(([pid, pdata]) => {
+          const slot = document.getElementById("slot-" + pid);
+          if (pid === playerId) {
+            if (tableData[pid]) {
+              slot.innerHTML = `
+                <img src="${tableData[pid].img}" alt="${tableData[pid].name}" style="width:80px;height:80px;border-radius:6px;"><br>
+                <strong>${tableData[pid].name}</strong><br>พลัง: ${tableData[pid].power}
+              `;
+            }
+          } else {
+            slot.innerHTML = tableData[pid] && tableRevealed
+              ? `
+                <img src="${tableData[pid].img}" alt="${tableData[pid].name}" style="width:80px;height:80px;border-radius:6px;"><br>
+                <strong>${tableData[pid].name}</strong><br>พลัง: ${tableData[pid].power}
+              `
+              : (pdata.name || pid);
+          }
         });
 
-        // --- ระบบคะแนนและจบรอบ ---
+        // เมื่อทุกคนวางครบ
         if (
           Object.keys(tableData).length === Object.keys(players).length &&
-          Object.keys(players).length > 0
+          Object.keys(players).length > 0 &&
+          !tableRevealed
         ) {
-          // นับคะแนน
-          if (currentRound === 1) scores = {}; // reset ตอนเริ่มเกมใหม่
-          let max = -Infinity, winner = [];
-          Object.entries(tableData).forEach(([pid, card]) => {
-            if (card.power > max) {
-              max = card.power;
-              winner = [pid];
-            } else if (card.power === max) {
-              winner.push(pid);
-            }
-          });
-          // เพิ่มคะแนนให้ผู้ชนะรอบนี้
-          Object.keys(players).forEach(pid => {
-            if (!scores[pid]) scores[pid] = 0;
-            if (winner.includes(pid)) scores[pid] += 1;
-          });
-
+          tableRevealed = true;
           setTimeout(() => {
-            // แจ้งผลรอบ
-            alert(
-              "รอบ " + currentRound + ":\n" +
-              Object.entries(tableData).map(([pid, card]) => {
-                const pname = players[pid]?.name || pid;
-                return `${pname}: ${card.name} (${card.power})`;
-              }).join("\n") +
-              "\n➡️ ผู้ชนะรอบนี้: " + (winner.length === 1 ? (players[winner[0]]?.name || winner[0]) : "เสมอกัน")
-            );
+            // แสดงไพ่ทุกคน
+            Object.entries(players).forEach(([pid, pdata]) => {
+              const card = tableData[pid];
+              const slot = document.getElementById("slot-" + pid);
+              slot.innerHTML = `
+                <img src="${card.img}" alt="${card.name}" style="width:80px;height:80px;border-radius:6px;"><br>
+                <strong>${card.name}</strong><br>พลัง: ${card.power}
+              `;
+            });
 
-            // ล้างช่องวางการ์ด
-            renderBattleSlots(players);
+            // คำนวณคะแนน
+            if (currentRound === 1) scores = {};
+            let max = -Infinity, winner = [];
+            Object.entries(tableData).forEach(([pid, card]) => {
+              if (card.power > max) {
+                max = card.power;
+                winner = [pid];
+              } else if (card.power === max) {
+                winner.push(pid);
+              }
+            });
+            Object.keys(players).forEach(pid => {
+              if (!scores[pid]) scores[pid] = 0;
+              if (winner.includes(pid)) scores[pid] += 1;
+            });
 
-            // ถ้าครบ 5 ตา ให้จบเกมและรวมคะแนน
-            if (currentRound >= 5) {
-              let maxScore = Math.max(...Object.values(scores));
-              let topPlayers = Object.entries(scores)
-                .filter(([_, sc]) => sc === maxScore)
-                .map(([pid]) => players[pid]?.name || pid);
-
-              // แสดงผลคะแนนรวม
+            setTimeout(() => {
               alert(
-                "จบเกม!\n\nคะแนนรวม:\n" +
-                Object.entries(scores).map(([pid, sc]) => {
+                "รอบ " + currentRound + ":\n" +
+                Object.entries(tableData).map(([pid, card]) => {
                   const pname = players[pid]?.name || pid;
-                  return `${pname}: ${sc} คะแนน`;
+                  return `${pname}: ${card.name} (${card.power})`;
                 }).join("\n") +
-                "\n\nผู้ชนะ: " + (topPlayers.length === 1 ? topPlayers[0] : "เสมอกัน")
+                "\n➡️ ผู้ชนะรอบนี้: " + (winner.length === 1 ? (players[winner[0]]?.name || winner[0]) : "เสมอกัน")
               );
 
-              // ล้างช่องวางการ์ดอีกครั้ง
               renderBattleSlots(players);
 
-              // สุ่มการ์ดใหม่ให้ทุกคน
-              Object.keys(players).forEach(pid => {
-                const newCards = getRandomCards();
-                db.ref(`rooms/${roomIdParam}/players/${pid}/cards`).set(newCards);
-              });
+              if (currentRound >= 5) {
+                let maxScore = Math.max(...Object.values(scores));
+                let topPlayers = Object.entries(scores)
+                  .filter(([_, sc]) => sc === maxScore)
+                  .map(([pid]) => players[pid]?.name || pid);
 
-              // รีเซ็ตเกม (กลับไปตา 1)
-              db.ref(`rooms/${roomIdParam}/currentRound`).set(1);
-            } else {
-              // ไปตาถัดไป
-              db.ref(`rooms/${roomIdParam}/currentRound`).set(currentRound + 1);
-            }
-          }, 500);
+                alert(
+                  "จบเกม!\n\nคะแนนรวม:\n" +
+                  Object.entries(scores).map(([pid, sc]) => {
+                    const pname = players[pid]?.name || pid;
+                    return `${pname}: ${sc} คะแนน`;
+                  }).join("\n") +
+                  "\n\nผู้ชนะ: " + (topPlayers.length === 1 ? topPlayers[0] : "เสมอกัน")
+                );
+                db.ref(`rooms/${roomIdParam}/currentRound`).set(1);
+              } else {
+                db.ref(`rooms/${roomIdParam}/currentRound`).set(currentRound + 1);
+              }
+            }, 3000); // delay 3 วิ
+          }, 3000); // delay 3 วิ
         }
       });
+
+      // แสดงไพ่เราเองทุกตา
+      if (players[playerId] && players[playerId].cards) {
+        showCards(players[playerId].cards);
+      }
     });
   });
 }
