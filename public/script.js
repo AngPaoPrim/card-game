@@ -50,6 +50,7 @@ let currentRound = 1;
 let roundListener = null;
 let scores = {};
 let tableRevealed = false;
+let isHost = false;
 
 function selectCard(index) {
   selectedCardIndex = index;
@@ -103,7 +104,9 @@ function updateRoundInfo(currentRound) {
   roundDiv.innerHTML = `<b>รอบที่ ${currentRound} / 5</b>`;
 }
 
+// แจกไพ่ใหม่เฉพาะ host (player1) เท่านั้น
 function dealNewCardsToAll(roomId, players) {
+  if (!isHost) return;
   Object.keys(players).forEach(pid => {
     const newCards = getRandomCards();
     db.ref(`rooms/${roomId}/players/${pid}/cards`).set(newCards);
@@ -143,9 +146,14 @@ function listenForBattle(roomIdParam) {
       currentRound = round;
       updateRoundInfo(currentRound);
 
-      // แจกไพ่ใหม่ทุกตา
+      // แจกไพ่ใหม่เฉพาะ host
       if (roundListener) roundListener.off();
-      dealNewCardsToAll(roomIdParam, players);
+      if (playerId === "player1") {
+        isHost = true;
+        dealNewCardsToAll(roomIdParam, players);
+      } else {
+        isHost = false;
+      }
       tableRevealed = false;
 
       roundListener = db.ref(`rooms/${roomIdParam}/table/round${currentRound}`);
@@ -259,6 +267,7 @@ window.createRoom = function () {
   }
   const cards = getRandomCards();
   playerId = "player1";
+  isHost = true;
   db.ref("rooms/" + roomId).set({
     players: {
       [playerId]: { cards: cards, name: playerName }
@@ -283,6 +292,7 @@ window.joinRoom = function () {
     const players = snapshot.val() || {};
     const num = Object.keys(players).length + 1;
     playerId = "player" + num;
+    isHost = false;
     const cards = getRandomCards();
     db.ref("rooms/" + roomId + "/players/" + playerId).set({
       cards: cards,
