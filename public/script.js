@@ -48,6 +48,11 @@ function getRandomCards() {
   }));
 }
 
+// ลบ table/roundN ก่อนแจกไพ่ใหม่ทุกครั้ง
+function resetTable(roomId, round) {
+  db.ref(`rooms/${roomId}/table/round${round}`).remove();
+}
+
 let playerId = null;
 let myCards = [];
 let selectedCardIndex = null;
@@ -250,6 +255,7 @@ function listenForBattle(roomIdParam) {
                   db.ref(`rooms/${roomIdParam}/currentRound`).set(1);
                   if (isHost) {
                     setTimeout(() => {
+                      resetTable(roomIdParam, 1); // ลบ table/round1 ก่อนแจกไพ่ใหม่
                       dealNewCardsToAll(roomIdParam, players);
                     }, 500);
                   }
@@ -271,6 +277,7 @@ function listenForBattle(roomIdParam) {
                 // แจกไพ่ใหม่หลังขึ้นรอบใหม่ (เฉพาะ host)
                 if (isHost) {
                   setTimeout(() => {
+                    resetTable(roomIdParam, currentRound + 1); // ลบ table/roundN ก่อนแจกไพ่ใหม่
                     dealNewCardsToAll(roomIdParam, players);
                   }, 500);
                 }
