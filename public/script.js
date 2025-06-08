@@ -36,7 +36,6 @@ const allCards = [
   { name: "Lava Zombie Skibidi", power: 79, img: "cards/20.png" },
 ];
 
-
 function getRandomCards() {
   const shuffled = [...allCards].sort(() => 0.5 - Math.random());
   return shuffled.slice(0, 5);
@@ -49,6 +48,7 @@ let roomId = "";
 let playerName = "";
 let currentRound = 1;
 let roundListener = null;
+let scores = {}; // เก็บคะแนนรวมแต่ละคน
 
 function selectCard(index) {
   selectedCardIndex = index;
@@ -91,25 +91,35 @@ function renderBattleSlots(players) {
   });
 }
 
+function updatePlayerList(players) {
+  const playerListDiv = document.getElementById("player-list");
+  const names = Object.values(players).map(p => p.name || "-");
+  playerListDiv.innerHTML = `<b>ผู้เล่น (${names.length} คน)</b><br>${names.map((n, i) => (i+1)+". "+n).join("<br>")}`;
+}
+
+function updateRoundInfo(currentRound) {
+  const roundDiv = document.getElementById("round-info");
+  roundDiv.innerHTML = `<b>รอบที่ ${currentRound} / 5</b>`;
+}
+
 function playCard() {
   if (selectedCardIndex === null) {
     alert("กรุณาเลือกการ์ดก่อนวาง!");
     return;
   }
-  const card = myCards[selectedCardIndex];
   db.ref(`rooms/${roomId}/currentRound`).once("value").then(roundSnap => {
     const round = roundSnap.val() || 1;
     const roundPath = `rooms/${roomId}/table/round${round}/${playerId}`;
     const updates = {};
-    updates[roundPath] = { ...card, nameDisplay: playerName };
+    updates[roundPath] = { ...myCards[selectedCardIndex], nameDisplay: playerName };
     db.ref().update(updates);
 
     document.getElementById("slot-" + playerId).innerHTML = `
-      <img src="${card.img}" alt="${card.name}" style="width:80px;height:80px;border-radius:6px;"><br>
-      <strong>${card.name}</strong><br>พลัง: ${card.power}
+      <img src="${myCards[selectedCardIndex].img}" alt="${myCards[selectedCardIndex].name}" style="width:80px;height:80px;border-radius:6px;"><br>
+      <strong>${myCards[selectedCardIndex].name}</strong><br>พลัง: ${myCards[selectedCardIndex].power}
     `;
 
-    alert(`วางการ์ด ${card.name} แล้ว รอผู้เล่นคนอื่น...`);
+    alert(`วางการ์ด ${myCards[selectedCardIndex].name} แล้ว รอผู้เล่นคนอื่น...`);
     selectedCardIndex = null;
   });
 }
@@ -117,12 +127,14 @@ function playCard() {
 function listenForBattle(roomIdParam) {
   db.ref(`rooms/${roomIdParam}/players`).on('value', (snap) => {
     const players = snap.val() || {};
+    updatePlayerList(players);
     renderBattleSlots(players);
 
     // ฟัง currentRound จาก database
     db.ref(`rooms/${roomIdParam}/currentRound`).on('value', (roundSnap) => {
       const round = roundSnap.val() || 1;
       currentRound = round;
+      updateRoundInfo(currentRound);
 
       // ถ้ามี listener เก่า ให้ปิดก่อน
       if (roundListener) roundListener.off();
@@ -137,10 +149,14 @@ function listenForBattle(roomIdParam) {
             <strong>${card.name}</strong><br>พลัง: ${card.power}
           `;
         });
+
+        // --- ระบบคะแนนและจบรอบ ---
         if (
           Object.keys(tableData).length === Object.keys(players).length &&
           Object.keys(players).length > 0
         ) {
+          // นับคะแนน
+          if (currentRound === 1) scores = {}; // reset ตอนเริ่มเกมใหม่
           let max = -Infinity, winner = [];
           Object.entries(tableData).forEach(([pid, card]) => {
             if (card.power > max) {
@@ -150,17 +166,58 @@ function listenForBattle(roomIdParam) {
               winner.push(pid);
             }
           });
+          // เพิ่มคะแนนให้ผู้ชนะรอบนี้
+          Object.keys(players).forEach(pid => {
+            if (!scores[pid]) scores[pid] = 0;
+            if (winner.includes(pid)) scores[pid] += 1;
+          });
+
           setTimeout(() => {
+            // แจ้งผลรอบ
             alert(
               "รอบ " + currentRound + ":\n" +
               Object.entries(tableData).map(([pid, card]) => {
                 const pname = players[pid]?.name || pid;
                 return `${pname}: ${card.name} (${card.power})`;
               }).join("\n") +
-              "\n➡️ ผู้ชนะ: " + (winner.length === 1 ? (players[winner[0]]?.name || winner[0]) : "เสมอกัน")
+              "\n➡️ ผู้ชนะรอบนี้: " + (winner.length === 1 ? (players[winner[0]]?.name || winner[0]) : "เสมอกัน")
             );
-            // อัปเดตรอบใน database (ให้ client ทุกคน sync)
-            db.ref(`rooms/${roomIdParam}/currentRound`).set(currentRound + 1);
+
+            // ล้างช่องวางการ์ด
+            renderBattleSlots(players);
+
+            // ถ้าครบ 5 ตา ให้จบเกมและรวมคะแนน
+            if (currentRound >= 5) {
+              let maxScore = Math.max(...Object.values(scores));
+              let topPlayers = Object.entries(scores)
+                .filter(([_, sc]) => sc === maxScore)
+                .map(([pid]) => players[pid]?.name || pid);
+
+              // แสดงผลคะแนนรวม
+              alert(
+                "จบเกม!\n\nคะแนนรวม:\n" +
+                Object.entries(scores).map(([pid, sc]) => {
+                  const pname = players[pid]?.name || pid;
+                  return `${pname}: ${sc} คะแนน`;
+                }).join("\n") +
+                "\n\nผู้ชนะ: " + (topPlayers.length === 1 ? topPlayers[0] : "เสมอกัน")
+              );
+
+              // ล้างช่องวางการ์ดอีกครั้ง
+              renderBattleSlots(players);
+
+              // สุ่มการ์ดใหม่ให้ทุกคน
+              Object.keys(players).forEach(pid => {
+                const newCards = getRandomCards();
+                db.ref(`rooms/${roomIdParam}/players/${pid}/cards`).set(newCards);
+              });
+
+              // รีเซ็ตเกม (กลับไปตา 1)
+              db.ref(`rooms/${roomIdParam}/currentRound`).set(1);
+            } else {
+              // ไปตาถัดไป
+              db.ref(`rooms/${roomIdParam}/currentRound`).set(currentRound + 1);
+            }
           }, 500);
         }
       });
@@ -213,17 +270,3 @@ window.joinRoom = function () {
     });
   });
 };
-function updatePlayerList(players) {
-  const playerListDiv = document.getElementById("player-list");
-  const names = Object.values(players).map(p => p.name || "-");
-  playerListDiv.innerHTML = `<b>ผู้เล่น (${names.length} คน)</b><br>${names.map((n, i) => (i+1)+". "+n).join("<br>")}`;
-}
-
-function listenForBattle(roomIdParam) {
-  db.ref(`rooms/${roomIdParam}/players`).on('value', (snap) => {
-    const players = snap.val() || {};
-    updatePlayerList(players); // <--- เพิ่มตรงนี้
-    renderBattleSlots(players);
-    // ...existing code...
-  });
-}

@@ -1,67 +1,90 @@
 body {
-  font-family: 'Arial', sans-serif;
-  text-align: center;
-  background: #121212;
-  color: white;
-  margin: 0;
-  padding: 20px;
-}
+      font-family: 'Arial', sans-serif;
+      text-align: center;
+      background: #121212;
+      color: white;
+      margin: 0;
+      padding: 20px;
+    }
 
-#player-hand {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
-}
+    #player-hand {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+    }
 
-.card {
-  width: 100px;
-  height: 140px;
-  background: #333;
-  border: 2px solid #666;
-  border-radius: 8px;
-  cursor: pointer;
-  padding: 10px;
-  color: white;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  transition: border 0.2s;
-}
+    .card {
+      width: 100px;
+      height: 140px;
+      background: #333;
+      border: 2px solid #666;
+      border-radius: 8px;
+      cursor: pointer;
+      padding: 10px;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: border 0.2s;
+    }
 
-.card.selected {
-  border: 2px solid #00ff99 !important;
-}
+    .card.selected {
+      border: 2px solid #00ff99 !important;
+    }
 
-.card img {
-  width: 80px;
-  height: 80px;
-  object-fit: cover;
-  border-radius: 6px;
-  margin-bottom: 6px;
-}
+    .card img {
+      width: 80px;
+      height: 80px;
+      object-fit: cover;
+      border-radius: 6px;
+      margin-bottom: 6px;
+    }
 
-.card:hover {
-  border-color: gold;
-}
+    .card:hover {
+      border-color: gold;
+    }
 
-#battlefield {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 30px;
-  margin-top: 20px;
-}
+    #battlefield {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 30px;
+      margin-top: 20px;
+    }
 
-.battle-slot {
-  width: 120px;
-  height: 160px;
-  background: #222;
-  border: 2px dashed #999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  flex-direction: column;
-  color: #fff;
-}
+    .battle-slot {
+      width: 120px;
+      height: 160px;
+      background: #222;
+      border: 2px dashed #999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      flex-direction: column;
+      color: #fff;
+    }
+
+    input {
+      margin: 5px;
+      padding: 10px;
+      border-radius: 5px;
+      border: 1px solid #666;
+      background: #333;
+      color: white;
+    }
+
+    button {
+      margin: 5px;
+      padding: 10px 20px;
+      border-radius: 5px;
+      border: none;
+      background: #555;
+      color: white;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #777;
+    }
