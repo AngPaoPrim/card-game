@@ -50,7 +50,7 @@ function getRandomCards() {
 
 // ลบ table/roundN ก่อนแจกไพ่ใหม่ทุกครั้ง
 function resetTable(roomId, round) {
-  db.ref(`rooms/${roomId}/table/round${round}`).remove();
+  return db.ref(`rooms/${roomId}/table/round${round}`).remove();
 }
 
 let playerId = null;
@@ -60,9 +60,12 @@ let roomId = "";
 let playerName = "";
 let currentRound = 1;
 let roundListener = null;
+let playersListener = null;
+let gameStateListener = null;
 let scores = {};
 let tableRevealed = false;
 let isHost = false;
+let isGameActive = false;
 
 function selectCard(index) {
   selectedCardIndex = index;
@@ -72,25 +75,30 @@ function selectCard(index) {
 }
 
 function showCards(cards) {
-  selectedCardIndex = null; // Reset ทุกครั้งก่อนแสดง
+  if (!cards || cards.length === 0) return;
+  
+  selectedCardIndex = null;
   myCards = cards;
   const cardDiv = document.getElementById("player-hand");
+  if (!cardDiv) return;
+  
   cardDiv.innerHTML = "";
   cards.forEach((card, index) => {
     const div = document.createElement("div");
     div.className = "card";
     div.onclick = () => selectCard(index);
     div.innerHTML = `
-      <img src="${card.img}" alt="${card.name}">
+      <img src="${card.img}" alt="${card.name}" onerror="this.style.display='none'">
       <strong>${card.name}</strong><br>พลัง: ${card.power}
     `;
     cardDiv.appendChild(div);
   });
-  // ปุ่มวางการ์ดจะถูกเพิ่มเฉพาะถ้ายังไม่ได้วางการ์ดในรอบนี้ (ดูใน listenForBattle)
 }
 
 function renderBattleSlots(players) {
   const battlefield = document.getElementById("battlefield");
+  if (!battlefield) return;
+  
   battlefield.innerHTML = "";
   Object.entries(players).forEach(([pid, pdata]) => {
     const div = document.createElement("div");
@@ -103,22 +111,30 @@ function renderBattleSlots(players) {
 
 function updatePlayerList(players) {
   const playerListDiv = document.getElementById("player-list");
+  if (!playerListDiv) return;
+  
   const names = Object.values(players).map(p => p.name || "-");
   playerListDiv.innerHTML = `<b>ผู้เล่น (${names.length} คน)</b><br>${names.map((n, i) => (i+1)+". "+n).join("<br>")}`;
 }
 
-function updateRoundInfo(currentRound) {
+function updateRoundInfo(round) {
   const roundDiv = document.getElementById("round-info");
-  roundDiv.innerHTML = `<b>รอบที่ ${currentRound} / 5</b>`;
+  if (!roundDiv) return;
+  
+  roundDiv.innerHTML = `<b>รอบที่ ${round} / 5</b>`;
 }
 
 // แจกไพ่ใหม่เฉพาะ host (player1) เท่านั้น
 function dealNewCardsToAll(roomId, players) {
   if (!isHost) return;
+  
+  const updates = {};
   Object.keys(players).forEach(pid => {
     const newCards = getRandomCards();
-    db.ref(`rooms/${roomId}/players/${pid}/cards`).set(newCards);
+    updates[`rooms/${roomId}/players/${pid}/cards`] = newCards;
   });
+  
+  return db.ref().update(updates);
 }
 
 function playCard() {
@@ -126,185 +142,301 @@ function playCard() {
     alert("กรุณาเลือกการ์ดก่อนวาง!");
     return;
   }
-  db.ref(`rooms/${roomId}/currentRound`).once("value").then(roundSnap => {
-    const round = roundSnap.val() || 1;
-    const roundPath = `rooms/${roomId}/table/round${round}/${playerId}`;
-    const updates = {};
-    updates[roundPath] = { ...myCards[selectedCardIndex], nameDisplay: playerName };
-    db.ref().update(updates);
+  
+  if (!myCards[selectedCardIndex]) {
+    alert("ไม่พบการ์ดที่เลือก!");
+    return;
+  }
 
-    document.getElementById("slot-" + playerId).innerHTML = `
-      <img src="${myCards[selectedCardIndex].img}" alt="${myCards[selectedCardIndex].name}" style="width:80px;height:80px;border-radius:6px;"><br>
-      <strong>${myCards[selectedCardIndex].name}</strong><br>พลัง: ${myCards[selectedCardIndex].power}
-    `;
-
-    alert(`วางการ์ด ${myCards[selectedCardIndex].name} แล้ว รอผู้เล่นคนอื่น...`);
+  const cardToPlay = myCards[selectedCardIndex];
+  const roundPath = `rooms/${roomId}/table/round${currentRound}/${playerId}`;
+  
+  db.ref(roundPath).set({
+    ...cardToPlay,
+    nameDisplay: playerName,
+    timestamp: firebase.database.ServerValue.TIMESTAMP
+  }).then(() => {
+    // อัพเดต UI ทันที
+    const slot = document.getElementById("slot-" + playerId);
+    if (slot) {
+      slot.innerHTML = `
+        <img src="${cardToPlay.img}" alt="${cardToPlay.name}" style="width:80px;height:80px;border-radius:6px;" onerror="this.style.display='none'"><br>
+        <strong>${cardToPlay.name}</strong><br>พลัง: ${cardToPlay.power}
+      `;
+    }
+    
+    // ซ่อนปุ่มวางการ์ด
+    const playBtn = document.getElementById("play-card-btn");
+    if (playBtn) playBtn.remove();
+    
+    alert(`วางการ์ด ${cardToPlay.name} แล้ว รอผู้เล่นคนอื่น...`);
     selectedCardIndex = null;
+  }).catch(error => {
+    console.error("Error playing card:", error);
+    alert("เกิดข้อผิดพลาดในการวางการ์ด");
   });
 }
 
+function cleanupListeners() {
+  if (roundListener) {
+    roundListener.off();
+    roundListener = null;
+  }
+  if (playersListener) {
+    playersListener.off();
+    playersListener = null;
+  }
+  if (gameStateListener) {
+    gameStateListener.off();
+    gameStateListener = null;
+  }
+}
+
+function calculateWinner(tableData) {
+  let maxPower = -Infinity;
+  let winners = [];
+  
+  Object.entries(tableData).forEach(([pid, card]) => {
+    if (card.power > maxPower) {
+      maxPower = card.power;
+      winners = [pid];
+    } else if (card.power === maxPower) {
+      winners.push(pid);
+    }
+  });
+  
+  return { winners, maxPower };
+}
+
+function updateScores(winners, players) {
+  if (currentRound === 1) {
+    scores = {};
+    Object.keys(players).forEach(pid => {
+      scores[pid] = 0;
+    });
+  }
+  
+  winners.forEach(pid => {
+    if (scores[pid] !== undefined) {
+      scores[pid] += 1;
+    }
+  });
+}
+
+function showRoundResults(tableData, players, winners) {
+  const resultsText = "รอบ " + currentRound + ":\n" +
+    Object.entries(tableData).map(([pid, card]) => {
+      const pname = players[pid]?.name || pid;
+      return `${pname}: ${card.name} (${card.power})`;
+    }).join("\n") +
+    "\n➡️ ผู้ชนะรอบนี้: " + (winners.length === 1 ? (players[winners[0]]?.name || winners[0]) : "เสมอกัน");
+  
+  alert(resultsText);
+}
+
+function showFinalResults(players) {
+  const maxScore = Math.max(...Object.values(scores));
+  const topPlayers = Object.entries(scores)
+    .filter(([_, sc]) => sc === maxScore)
+    .map(([pid]) => players[pid]?.name || pid);
+
+  const finalText = "จบเกม!\n\nคะแนนรวม:\n" +
+    Object.entries(scores).map(([pid, sc]) => {
+      const pname = players[pid]?.name || pid;
+      return `${pname}: ${sc} คะแนน`;
+    }).join("\n") +
+    "\n\nผู้ชนะ: " + (topPlayers.length === 1 ? topPlayers[0] : "เสมอกัน");
+  
+  alert(finalText);
+}
+
+function addGameActions() {
+  let actionsDiv = document.getElementById("game-actions");
+  if (!actionsDiv) {
+    actionsDiv = document.createElement("div");
+    actionsDiv.id = "game-actions";
+    actionsDiv.style.margin = "20px";
+    document.body.appendChild(actionsDiv);
+  }
+  
+  actionsDiv.innerHTML = `
+    <button id="play-again-btn">เล่นใหม่</button>
+    <button id="exit-btn">ออก</button>
+  `;
+  
+  document.getElementById("play-again-btn").onclick = () => {
+    if (isHost) {
+      actionsDiv.innerHTML = "";
+      scores = {};
+      db.ref(`rooms/${roomId}/currentRound`).set(1).then(() => {
+        return resetTable(roomId, 1);
+      }).then(() => {
+        return db.ref(`rooms/${roomId}/players`).once('value');
+      }).then(snapshot => {
+        const players = snapshot.val() || {};
+        return dealNewCardsToAll(roomId, players);
+      }).catch(error => {
+        console.error("Error restarting game:", error);
+      });
+    }
+  };
+  
+  document.getElementById("exit-btn").onclick = () => {
+    cleanupListeners();
+    // ลบผู้เล่นออกจากห้อง
+    if (playerId && roomId) {
+      db.ref(`rooms/${roomId}/players/${playerId}`).remove();
+    }
+    location.reload();
+  };
+}
+
 function listenForBattle(roomIdParam) {
-  db.ref(`rooms/${roomIdParam}/players`).on('value', (snap) => {
+  if (!roomIdParam) return;
+  
+  cleanupListeners(); // เคลียร์ listener เก่าก่อน
+  isGameActive = true;
+  
+  // Listen to players
+  playersListener = db.ref(`rooms/${roomIdParam}/players`);
+  playersListener.on('value', (snap) => {
     const players = snap.val() || {};
     updatePlayerList(players);
     renderBattleSlots(players);
-
-    db.ref(`rooms/${roomIdParam}/currentRound`).on('value', (roundSnap) => {
+    
+    // Check if we're still in the game
+    if (!players[playerId]) {
+      alert("คุณถูกตัดการเชื่อมต่อจากห้อง");
+      cleanupListeners();
+      location.reload();
+      return;
+    }
+    
+    // Listen to current round
+    if (gameStateListener) gameStateListener.off();
+    gameStateListener = db.ref(`rooms/${roomIdParam}/currentRound`);
+    gameStateListener.on('value', (roundSnap) => {
       const round = roundSnap.val() || 1;
       currentRound = round;
       updateRoundInfo(currentRound);
-
-      if (roundListener) roundListener.off();
+      
       isHost = playerId === "player1";
       tableRevealed = false;
-
+      
+      // Listen to table for current round
+      if (roundListener) roundListener.off();
       roundListener = db.ref(`rooms/${roomIdParam}/table/round${currentRound}`);
       roundListener.on('value', (snapshot) => {
         const tableData = snapshot.val() || {};
-
-        // แสดงเฉพาะไพ่ที่เราวางเอง (หรือยังไม่วาง)
+        
+        // แสดงการ์ดที่วางแล้ว
         Object.entries(players).forEach(([pid, pdata]) => {
           const slot = document.getElementById("slot-" + pid);
+          if (!slot) return;
+          
           if (pid === playerId) {
+            // แสดงการ์ดของตัวเองเสมอ
             if (tableData[pid]) {
               slot.innerHTML = `
-                <img src="${tableData[pid].img}" alt="${tableData[pid].name}" style="width:80px;height:80px;border-radius:6px;"><br>
+                <img src="${tableData[pid].img}" alt="${tableData[pid].name}" style="width:80px;height:80px;border-radius:6px;" onerror="this.style.display='none'"><br>
                 <strong>${tableData[pid].name}</strong><br>พลัง: ${tableData[pid].power}
               `;
+            } else {
+              slot.innerHTML = pdata.name || pid;
             }
           } else {
-            slot.innerHTML = tableData[pid] && tableRevealed
-              ? `
-                <img src="${tableData[pid].img}" alt="${tableData[pid].name}" style="width:80px;height:80px;border-radius:6px;"><br>
+            // แสดงการ์ดของคนอื่นเฉพาะเมื่อเปิดแล้ว
+            if (tableData[pid] && tableRevealed) {
+              slot.innerHTML = `
+                <img src="${tableData[pid].img}" alt="${tableData[pid].name}" style="width:80px;height:80px;border-radius:6px;" onerror="this.style.display='none'"><br>
                 <strong>${tableData[pid].name}</strong><br>พลัง: ${tableData[pid].power}
-              `
-              : (pdata.name || pid);
+              `;
+            } else {
+              slot.innerHTML = tableData[pid] ? "🎴 วางการ์ดแล้ว" : (pdata.name || pid);
+            }
           }
         });
-
-        // แสดงปุ่มวางการ์ดเฉพาะถ้ายังไม่ได้วาง
+        
+        // จัดการการแสดงการ์ดในมือ
         if (players[playerId] && players[playerId].cards) {
           const cardDiv = document.getElementById("player-hand");
+          if (!cardDiv) return;
+          
           if (!tableData[playerId]) {
+            // ยังไม่ได้วางการ์ด - แสดงการ์ดและปุ่ม
             showCards(players[playerId].cards);
-            // เพิ่มปุ่มวางการ์ด
-            const playBtn = document.createElement("button");
-            playBtn.innerText = "วางการ์ดในรอบนี้";
-            playBtn.onclick = () => playCard();
-            cardDiv.appendChild(document.createElement("br"));
-            cardDiv.appendChild(playBtn);
+            
+            // เพิ่มปุ่มวางการ์ดถ้ายังไม่มี
+            if (!document.getElementById("play-card-btn")) {
+              const playBtn = document.createElement("button");
+              playBtn.id = "play-card-btn";
+              playBtn.innerText = "วางการ์ดในรอบนี้";
+              playBtn.onclick = () => playCard();
+              cardDiv.appendChild(document.createElement("br"));
+              cardDiv.appendChild(playBtn);
+            }
           } else {
-            // ถ้าวางแล้ว ให้โชว์การ์ดเฉยๆ ไม่มีปุ่ม
+            // วางการ์ดแล้ว - แสดงการ์ดเฉยๆ
             myCards = players[playerId].cards;
             cardDiv.innerHTML = "";
             myCards.forEach((card, index) => {
               const div = document.createElement("div");
               div.className = "card";
               div.innerHTML = `
-                <img src="${card.img}" alt="${card.name}">
+                <img src="${card.img}" alt="${card.name}" onerror="this.style.display='none'">
                 <strong>${card.name}</strong><br>พลัง: ${card.power}
               `;
               cardDiv.appendChild(div);
             });
           }
         }
-
+        
         // เมื่อทุกคนวางครบ
-        if (
-          Object.keys(tableData).length === Object.keys(players).length &&
-          Object.keys(players).length > 0 &&
-          !tableRevealed
-        ) {
+        const playerCount = Object.keys(players).length;
+        const cardsPlayed = Object.keys(tableData).length;
+        
+        if (cardsPlayed === playerCount && playerCount > 0 && !tableRevealed) {
           tableRevealed = true;
+          
           setTimeout(() => {
-            // แสดงไพ่ทุกคน
+            // แสดงการ์ดทุกคน
             Object.entries(players).forEach(([pid, pdata]) => {
               const card = tableData[pid];
               const slot = document.getElementById("slot-" + pid);
-              slot.innerHTML = `
-                <img src="${card.img}" alt="${card.name}" style="width:80px;height:80px;border-radius:6px;"><br>
-                <strong>${card.name}</strong><br>พลัง: ${card.power}
-              `;
-            });
-
-            // คำนวณคะแนน
-            if (currentRound === 1) scores = {};
-            let max = -Infinity, winner = [];
-            Object.entries(tableData).forEach(([pid, card]) => {
-              if (card.power > max) {
-                max = card.power;
-                winner = [pid];
-              } else if (card.power === max) {
-                winner.push(pid);
-              }
-            });
-            Object.keys(players).forEach(pid => {
-              if (!scores[pid]) scores[pid] = 0;
-              if (winner.includes(pid)) scores[pid] += 1;
-            });
-
-            setTimeout(() => {
-              alert(
-                "รอบ " + currentRound + ":\n" +
-                Object.entries(tableData).map(([pid, card]) => {
-                  const pname = players[pid]?.name || pid;
-                  return `${pname}: ${card.name} (${card.power})`;
-                }).join("\n") +
-                "\n➡️ ผู้ชนะรอบนี้: " + (winner.length === 1 ? (players[winner[0]]?.name || winner[0]) : "เสมอกัน")
-              );
-
-              renderBattleSlots(players);
-
-              if (currentRound >= 5) {
-                let maxScore = Math.max(...Object.values(scores));
-                let topPlayers = Object.entries(scores)
-                  .filter(([_, sc]) => sc === maxScore)
-                  .map(([pid]) => players[pid]?.name || pid);
-
-                // --- ปุ่มเล่นใหม่/ออก ---
-                let actionsDiv = document.getElementById("game-actions");
-                if (!actionsDiv) {
-                  actionsDiv = document.createElement("div");
-                  actionsDiv.id = "game-actions";
-                  actionsDiv.style.margin = "20px";
-                  document.body.appendChild(actionsDiv);
-                }
-                actionsDiv.innerHTML = `
-                  <button id="play-again-btn">เล่นใหม่</button>
-                  <button id="exit-btn">ออก</button>
+              if (slot && card) {
+                slot.innerHTML = `
+                  <img src="${card.img}" alt="${card.name}" style="width:80px;height:80px;border-radius:6px;" onerror="this.style.display='none'"><br>
+                  <strong>${card.name}</strong><br>พลัง: ${card.power}
                 `;
-                document.getElementById("play-again-btn").onclick = () => {
-                  // บันทึกชื่อและห้องลง localStorage
-                  localStorage.setItem("cardgame_roomId", roomIdParam);
-                  localStorage.setItem("cardgame_playerName", playerName);
-                  location.reload();
-                };
-                document.getElementById("exit-btn").onclick = () => {
-                  localStorage.removeItem("cardgame_roomId");
-                  localStorage.removeItem("cardgame_playerName");
-                  location.reload();
-                };
-
-                alert(
-                  "จบเกม!\n\nคะแนนรวม:\n" +
-                  Object.entries(scores).map(([pid, sc]) => {
-                    const pname = players[pid]?.name || pid;
-                    return `${pname}: ${sc} คะแนน`;
-                  }).join("\n") +
-                  "\n\nผู้ชนะ: " + (topPlayers.length === 1 ? topPlayers[0] : "เสมอกัน")
-                );
+              }
+            });
+            
+            // คำนวณผลลัพธ์
+            const { winners } = calculateWinner(tableData);
+            updateScores(winners, players);
+            
+            setTimeout(() => {
+              showRoundResults(tableData, players, winners);
+              renderBattleSlots(players);
+              
+              if (currentRound >= 5) {
+                // จบเกม
+                showFinalResults(players);
+                addGameActions();
               } else {
-                db.ref(`rooms/${roomIdParam}/currentRound`).set(currentRound + 1);
-                // แจกไพ่ใหม่หลังขึ้นรอบใหม่ (เฉพาะ host)
+                // ไปรอบต่อไป
                 if (isHost) {
-                  setTimeout(() => {
-                    resetTable(roomIdParam, currentRound + 1); // ลบ table/roundN ก่อนแจกไพ่ใหม่
-                    dealNewCardsToAll(roomIdParam, players);
-                  }, 500);
+                  db.ref(`rooms/${roomIdParam}/currentRound`).set(currentRound + 1).then(() => {
+                    return resetTable(roomIdParam, currentRound + 1);
+                  }).then(() => {
+                    return dealNewCardsToAll(roomIdParam, players);
+                  }).catch(error => {
+                    console.error("Error advancing round:", error);
+                  });
                 }
               }
-            }, 3000); // delay 3 วิ
-          }, 3000); // delay 3 วิ
+            }, 3000);
+          }, 2000);
         }
       });
     });
@@ -313,69 +445,106 @@ function listenForBattle(roomIdParam) {
 
 // สร้างห้อง (คนแรก)
 window.createRoom = function () {
-  roomId = document.getElementById("room-id").value.trim();
-  playerName = document.getElementById("player-name").value.trim() || "Player";
+  const roomIdInput = document.getElementById("room-id");
+  const playerNameInput = document.getElementById("player-name");
+  
+  if (!roomIdInput || !playerNameInput) {
+    alert("ไม่พบ input elements");
+    return;
+  }
+  
+  roomId = roomIdInput.value.trim();
+  playerName = playerNameInput.value.trim() || "Player";
+  
   if (!roomId) {
     alert("กรุณากรอกรหัสห้อง");
     return;
   }
-  // บันทึกลง localStorage
-  localStorage.setItem("cardgame_roomId", roomId);
-  localStorage.setItem("cardgame_playerName", playerName);
-
-  const cards = getRandomCards();
-  playerId = "player1";
-  isHost = true;
-  db.ref("rooms/" + roomId).set({
-    players: {
-      [playerId]: { cards: cards, name: playerName }
-    },
-    currentRound: 1
+  
+  // ตรวจสอบว่าห้องมีอยู่แล้วหรือไม่
+  db.ref("rooms/" + roomId).once("value").then(snapshot => {
+    if (snapshot.exists()) {
+      alert("ห้องนี้มีอยู่แล้ว กรุณาใช้รหัสห้องอื่น");
+      return;
+    }
+    
+    const cards = getRandomCards();
+    playerId = "player1";
+    isHost = true;
+    
+    return db.ref("rooms/" + roomId).set({
+      players: {
+        [playerId]: { cards: cards, name: playerName }
+      },
+      currentRound: 1,
+      createdAt: firebase.database.ServerValue.TIMESTAMP
+    });
   }).then(() => {
-    showCards(cards);
-    listenForBattle(roomId);
-    alert("สร้างห้องสำเร็จ รอเพื่อนเข้าร่วม");
+    if (isHost) {
+      listenForBattle(roomId);
+      alert("สร้างห้องสำเร็จ รอเพื่อนเข้าร่วม");
+    }
+  }).catch(error => {
+    console.error("Error creating room:", error);
+    alert("เกิดข้อผิดพลาดในการสร้างห้อง");
   });
 };
 
 // เข้าห้อง (คนถัดไป)
 window.joinRoom = function () {
-  roomId = document.getElementById("room-id").value.trim();
-  playerName = document.getElementById("player-name").value.trim() || "Player";
+  const roomIdInput = document.getElementById("room-id");
+  const playerNameInput = document.getElementById("player-name");
+  
+  if (!roomIdInput || !playerNameInput) {
+    alert("ไม่พบ input elements");
+    return;
+  }
+  
+  roomId = roomIdInput.value.trim();
+  playerName = playerNameInput.value.trim() || "Player";
+  
   if (!roomId) {
     alert("กรุณากรอกรหัสห้อง");
     return;
   }
-  // บันทึกลง localStorage
-  localStorage.setItem("cardgame_roomId", roomId);
-  localStorage.setItem("cardgame_playerName", playerName);
-
+  
   db.ref("rooms/" + roomId + "/players").once("value").then(snapshot => {
-    const players = snapshot.val() || {};
-    const num = Object.keys(players).length + 1;
+    const players = snapshot.val();
+    
+    if (!players) {
+      alert("ไม่พบห้องนี้");
+      return;
+    }
+    
+    const playerCount = Object.keys(players).length;
+    if (playerCount >= 6) {
+      alert("ห้องเต็มแล้ว (สูงสุด 6 คน)");
+      return;
+    }
+    
+    const num = playerCount + 1;
     playerId = "player" + num;
     isHost = false;
     const cards = getRandomCards();
-    db.ref("rooms/" + roomId + "/players/" + playerId).set({
+    
+    return db.ref("rooms/" + roomId + "/players/" + playerId).set({
       cards: cards,
-      name: playerName
-    }).then(() => {
-      showCards(cards);
-      listenForBattle(roomId);
-      alert("เข้าห้องสำเร็จ! คุณคือ " + playerName);
+      name: playerName,
+      joinedAt: firebase.database.ServerValue.TIMESTAMP
     });
+  }).then(() => {
+    listenForBattle(roomId);
+    alert("เข้าห้องสำเร็จ! คุณคือ " + playerName);
+  }).catch(error => {
+    console.error("Error joining room:", error);
+    alert("เกิดข้อผิดพลาดในการเข้าห้อง");
   });
 };
 
-// Auto join ห้องเดิมชื่อเดิมหลัง reload ถ้ามีข้อมูล
-window.onload = function () {
-  const savedRoom = localStorage.getItem("cardgame_roomId");
-  const savedName = localStorage.getItem("cardgame_playerName");
-  if (savedRoom && savedName) {
-    document.getElementById("room-id").value = savedRoom;
-    document.getElementById("player-name").value = savedName;
-    setTimeout(() => {
-      window.joinRoom();
-    }, 300);
+// Cleanup เมื่อปิดหน้าต่าง
+window.addEventListener('beforeunload', () => {
+  cleanupListeners();
+  if (playerId && roomId) {
+    db.ref(`rooms/${roomId}/players/${playerId}`).remove();
   }
-};
+});
