@@ -1,0 +1,27 @@
+{
+  "name": "card-game",
+  "version": "1.0.0",
+  "description": "A card battle game where players randomly receive cards and compete based on card power.",
+  "main": "src/script.js",
+  "scripts": {
+    "start": "live-server src",
+    "build": "echo 'Build step can be added here.'"
+  },
+  "keywords": [
+    "card",
+    "game",
+    "battle",
+    "multiplayer"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "live-server": "^1.2.1"
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/card-game.git"
+  },
+  "homepage": "https://github.com/yourusername/card-game#readme"
+}

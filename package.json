@@ -1,0 +1,10 @@
+{
+  "name": "card-game",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "serve . -l 10000"
+  },
+  "dependencies": {
+    "serve": "^14.2.0"
+  }
+}

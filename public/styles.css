@@ -1,0 +1,67 @@
+body {
+  font-family: 'Arial', sans-serif;
+  text-align: center;
+  background: #121212;
+  color: white;
+  margin: 0;
+  padding: 20px;
+}
+
+#player-hand {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.card {
+  width: 100px;
+  height: 140px;
+  background: #333;
+  border: 2px solid #666;
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 10px;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: border 0.2s;
+}
+
+.card.selected {
+  border: 2px solid #00ff99 !important;
+}
+
+.card img {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 6px;
+}
+
+.card:hover {
+  border-color: gold;
+}
+
+#battlefield {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+  margin-top: 20px;
+}
+
+.battle-slot {
+  width: 120px;
+  height: 160px;
+  background: #222;
+  border: 2px dashed #999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-direction: column;
+  color: #fff;
+}

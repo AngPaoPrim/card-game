@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>Card Battle Game</title>
+  <!-- Firebase CDN -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./script.js"></script>
+</head>
+<body>
+  <div id="player-list" style="position:fixed;top:10px;left:10px;text-align:left;background:rgba(0,0,0,0.5);padding:10px 16px;border-radius:8px;z-index:1000;min-width:160px;"></div>
+  <h1>🎴 เกมสุ่มการ์ดสู้กับเพื่อน</h1>
+  <input id="player-name" placeholder="ชื่อผู้เล่น">
+  <input id="room-id" placeholder="รหัสห้อง">
+  <br>
+  <button onclick="createRoom()">สร้างห้อง</button>
+  <button onclick="joinRoom()">เข้าห้อง</button>
+
+  <h2>การ์ดของคุณ:</h2>
+  <div id="player-hand"></div>
+
+  <h2>โต๊ะต่อสู้:</h2>
+  <div id="battlefield"></div>
+</body>
+</html>
