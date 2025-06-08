@@ -86,7 +86,6 @@ function showCards(cards) {
     `;
     cardDiv.appendChild(div);
   });
-
   // ปุ่มวางการ์ดจะถูกเพิ่มเฉพาะถ้ายังไม่ได้วางการ์ดในรอบนี้ (ดูใน listenForBattle)
 }
 
@@ -275,16 +274,14 @@ function listenForBattle(roomIdParam) {
                   <button id="exit-btn">ออก</button>
                 `;
                 document.getElementById("play-again-btn").onclick = () => {
-                  actionsDiv.innerHTML = "";
-                  db.ref(`rooms/${roomIdParam}/currentRound`).set(1);
-                  if (isHost) {
-                    setTimeout(() => {
-                      resetTable(roomIdParam, 1); // ลบ table/round1 ก่อนแจกไพ่ใหม่
-                      dealNewCardsToAll(roomIdParam, players);
-                    }, 500);
-                  }
+                  // บันทึกชื่อและห้องลง localStorage
+                  localStorage.setItem("cardgame_roomId", roomIdParam);
+                  localStorage.setItem("cardgame_playerName", playerName);
+                  location.reload();
                 };
                 document.getElementById("exit-btn").onclick = () => {
+                  localStorage.removeItem("cardgame_roomId");
+                  localStorage.removeItem("cardgame_playerName");
                   location.reload();
                 };
 
@@ -322,6 +319,10 @@ window.createRoom = function () {
     alert("กรุณากรอกรหัสห้อง");
     return;
   }
+  // บันทึกลง localStorage
+  localStorage.setItem("cardgame_roomId", roomId);
+  localStorage.setItem("cardgame_playerName", playerName);
+
   const cards = getRandomCards();
   playerId = "player1";
   isHost = true;
@@ -345,6 +346,10 @@ window.joinRoom = function () {
     alert("กรุณากรอกรหัสห้อง");
     return;
   }
+  // บันทึกลง localStorage
+  localStorage.setItem("cardgame_roomId", roomId);
+  localStorage.setItem("cardgame_playerName", playerName);
+
   db.ref("rooms/" + roomId + "/players").once("value").then(snapshot => {
     const players = snapshot.val() || {};
     const num = Object.keys(players).length + 1;
@@ -360,4 +365,17 @@ window.joinRoom = function () {
       alert("เข้าห้องสำเร็จ! คุณคือ " + playerName);
     });
   });
+};
+
+// Auto join ห้องเดิมชื่อเดิมหลัง reload ถ้ามีข้อมูล
+window.onload = function () {
+  const savedRoom = localStorage.getItem("cardgame_roomId");
+  const savedName = localStorage.getItem("cardgame_playerName");
+  if (savedRoom && savedName) {
+    document.getElementById("room-id").value = savedRoom;
+    document.getElementById("player-name").value = savedName;
+    setTimeout(() => {
+      window.joinRoom();
+    }, 300);
+  }
 };
