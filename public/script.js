@@ -104,9 +104,9 @@ function updateRoundInfo(currentRound) {
   roundDiv.innerHTML = `<b>รอบที่ ${currentRound} / 5</b>`;
 }
 
-// แจกไพ่ใหม่เฉพาะ host (player1) เท่านั้น
+// แจกไพ่ใหม่เฉพาะ host (player1) เท่านั้น และไม่ใช่รอบแรก
 function dealNewCardsToAll(roomId, players) {
-  if (!isHost) return;
+  if (!isHost || currentRound === 1) return;
   Object.keys(players).forEach(pid => {
     const newCards = getRandomCards();
     db.ref(`rooms/${roomId}/players/${pid}/cards`).set(newCards);
@@ -146,11 +146,13 @@ function listenForBattle(roomIdParam) {
       currentRound = round;
       updateRoundInfo(currentRound);
 
-      // แจกไพ่ใหม่เฉพาะ host
+      // แจกไพ่ใหม่เฉพาะ host และไม่ใช่รอบแรก
       if (roundListener) roundListener.off();
       if (playerId === "player1") {
         isHost = true;
-        dealNewCardsToAll(roomIdParam, players);
+        if (currentRound > 1) {
+          dealNewCardsToAll(roomIdParam, players);
+        }
       } else {
         isHost = false;
       }
